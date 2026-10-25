@@ -1,7 +1,7 @@
 /*
  ==============================================================================
   PARITY GUARD — 4-Bit XOR Parity Error Detection System
-  ESP32 Firmware with Wi-Fi AP & REST API Server
+  ESP32 Firmware with Wi-Fi AP & REST API Server (Offline LittleFS Serving)
  ==============================================================================
 
   Hardware Setup:
@@ -11,17 +11,20 @@
   - Switch 4 (D4): GPIO 22 (Input)
   - Switch 5 (Received Parity P_RX): GPIO 25 (Input)
   - Error LED: GPIO 26 (Output, Active HIGH via 330 ohm resistor)
-  - 7486 Quad 2-Input XOR IC (Optional hardware XOR co-processor or verification)
+  - 7486 Quad 2-Input XOR IC (Hardware XOR co-processor / verification)
 
   Operation:
-  - Spawns Wi-Fi SoftAP: "PARITY_GUARD_AP" (Pass: "12345678", IP: 192.168.4.1)
+  - Spawns Wi-Fi SoftAP: "ParityGuard" (Pass: "Parity123", IP: 192.168.4.1)
+  - Captive Portal DNS server routes all browser requests to 192.168.4.1
+  - Serves static dashboard files (index.html, styles.css, app.js) via LittleFS
   - Serves HTTP REST endpoint "/api/status" (JSON with CORS enabled)
-  - Serves complete web dashboard directly on http://192.168.4.1/
  ==============================================================================
 */
 
 #include <WiFi.h>
 #include <WebServer.h>
+#include <LittleFS.h>
+#include <DNSServer.h>
 
 // ----------------------------------------------------------------------------
 // PIN ASSIGNMENTS
@@ -40,10 +43,14 @@
 // ----------------------------------------------------------------------------
 // WI-FI & WEB SERVER CONFIGURATION
 // ----------------------------------------------------------------------------
-const char* AP_SSID = "PARITY_GUARD_AP";
-const char* AP_PASS = "12345678"; // Min 8 chars, or set to "" for open network
+const char* AP_SSID = "ParityGuard";
+const char* AP_PASS = "Parity123"; // WPA2-PSK passphrase
 
+const byte DNS_PORT = 53;
+DNSServer dnsServer;
 WebServer server(80);
+
+bool littleFsMounted = false;
 
 // Global State
 volatile int d1 = 0;
@@ -97,7 +104,7 @@ void setCorsHeaders() {
   server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-// /api/status -> Returns JSON telemetry
+// /api/status -> Returns JSON telemetry with required schema
 void handleApiStatus() {
   setCorsHeaders();
   updateSensorsAndLogic();
@@ -107,6 +114,11 @@ void handleApiStatus() {
   json += "\"d2\":" + String(d2) + ",";
   json += "\"d3\":" + String(d3) + ",";
   json += "\"d4\":" + String(d4) + ",";
+  json += "\"receivedParity\":" + String(received_parity) + ",";
+  json += "\"calculatedParity\":" + String(calculated_parity) + ",";
+  json += "\"errorDetected\":" + String(has_error ? "true" : "false") + ",";
+  json += "\"errorLED\":" + String(has_error ? "true" : "false") + ",";
+  // Backward-compatible aliases
   json += "\"received_parity\":" + String(received_parity) + ",";
   json += "\"calculated_parity\":" + String(calculated_parity) + ",";
   json += "\"error\":" + String(has_error ? "true" : "false") + ",";
@@ -123,7 +135,7 @@ void handleOptions() {
   server.send(204);
 }
 
-// Minimal embedded fallback page if files are not in SPIFFS
+// Minimal embedded fallback page if files have not yet been uploaded to LittleFS
 const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
@@ -131,19 +143,26 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <meta charset="UTF-8">
   <title>PARITY GUARD - ESP32 Access Point</title>
   <style>
-    body { font-family: sans-serif; background: #080c16; color: #fff; text-align: center; padding: 40px; }
-    h1 { color: #38bdf8; }
-    .box { background: #0f172a; padding: 20px; border-radius: 12px; display: inline-block; max-width: 500px; border: 1px solid #334155; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #080c16; color: #fff; text-align: center; padding: 40px; margin: 0; }
+    h1 { color: #38bdf8; margin-bottom: 8px; }
+    .box { background: #0f172a; padding: 28px; border-radius: 12px; display: inline-block; max-width: 540px; border: 1px solid #334155; box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: left; }
     a { color: #06b6d4; text-decoration: none; font-weight: bold; }
-    code { background: #1e293b; padding: 2px 6px; border-radius: 4px; color: #38bdf8; }
+    code { background: #1e293b; padding: 3px 8px; border-radius: 4px; color: #38bdf8; font-family: monospace; }
+    ol { line-height: 1.6; padding-left: 20px; color: #cbd5e1; }
+    .badge { display: inline-block; background: #0284c7; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 9999px; margin-bottom: 12px; }
   </style>
 </head>
 <body>
   <div class="box">
+    <span class="badge">ESP32 ACCESS POINT READY</span>
     <h1>🛡️ PARITY GUARD ONLINE</h1>
-    <p>ESP32 hardware server is running.</p>
-    <p>API Endpoint: <a href="/api/status"><code>/api/status</code></a></p>
-    <p>Upload <code>index.html</code>, <code>styles.css</code>, and <code>app.js</code> via LittleFS / SPIFFS, or open your local dashboard and point the endpoint to <code>http://192.168.4.1/api/status</code>.</p>
+    <p style="color: #94a3b8;">ESP32 hardware server is running. Live API status is working at <a href="/api/status"><code>/api/status</code></a>.</p>
+    <p><strong>To display the full dashboard directly from this ESP32:</strong></p>
+    <ol>
+      <li>Place <code>index.html</code>, <code>styles.css</code>, and <code>app.js</code> into a <code>data</code> folder inside the sketch directory.</li>
+      <li>In Arduino IDE, run <strong>ESP32 LittleFS Data Upload</strong> (or use <code>arduino-littlefs-upload</code>).</li>
+      <li>Refresh this page, and the full interactive laboratory dashboard will load offline!</li>
+    </ol>
   </div>
 </body>
 </html>
@@ -183,6 +202,14 @@ void setup() {
   pinMode(PIN_LED_ERROR, OUTPUT);
   digitalWrite(PIN_LED_ERROR, LOW);
 
+  // Initialize LittleFS filesystem
+  if (LittleFS.begin(true)) {
+    Serial.println("[FS] LittleFS mounted successfully.");
+    littleFsMounted = true;
+  } else {
+    Serial.println("[FS] Warning: LittleFS mount failed.");
+  }
+
   // Initialize Wi-Fi SoftAP
   Serial.print("Starting Wi-Fi Access Point: ");
   Serial.println(AP_SSID);
@@ -193,10 +220,45 @@ void setup() {
   Serial.print("Access Point IP Address: ");
   Serial.println(myIP);
 
-  // Register WebServer routes
-  server.on("/", HTTP_GET, handleRoot);
+  // Start Captive Portal DNS server (redirects queries to ESP32 IP)
+  dnsServer.start(DNS_PORT, "*", myIP);
+  Serial.println("Captive portal DNS server active.");
+
+  // Register WebServer API routes
   server.on("/api/status", HTTP_GET, handleApiStatus);
   server.on("/api/status", HTTP_OPTIONS, handleOptions);
+
+  // LittleFS static web dashboard serving
+  if (littleFsMounted && LittleFS.exists("/index.html")) {
+    Serial.println("[HTTP] Serving dashboard files directly from LittleFS.");
+    server.serveStatic("/", LittleFS, "/index.html");
+    server.serveStatic("/index.html", LittleFS, "/index.html");
+    server.serveStatic("/styles.css", LittleFS, "/styles.css");
+    server.serveStatic("/app.js", LittleFS, "/app.js");
+    server.serveStatic("/", LittleFS, "/");
+  } else {
+    Serial.println("[HTTP] Notice: /index.html not found in LittleFS. Serving fallback page.");
+    server.on("/", HTTP_GET, handleRoot);
+  }
+
+  // Captive portal fallback / 404 handler
+  server.onNotFound([]() {
+    if (littleFsMounted && LittleFS.exists(server.uri())) {
+      String uri = server.uri();
+      String contentType = "text/plain";
+      if (uri.endsWith(".html")) contentType = "text/html";
+      else if (uri.endsWith(".css")) contentType = "text/css";
+      else if (uri.endsWith(".js")) contentType = "application/javascript";
+      else if (uri.endsWith(".json")) contentType = "application/json";
+      File file = LittleFS.open(uri, "r");
+      server.streamFile(file, contentType);
+      file.close();
+    } else {
+      // Redirect unknown requests to root
+      server.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/", true);
+      server.send(302, "text/plain", "");
+    }
+  });
 
   server.begin();
   Serial.println("HTTP Web Server ready on port 80.");
@@ -207,7 +269,9 @@ void setup() {
 // ARDUINO MAIN LOOP
 // ----------------------------------------------------------------------------
 void loop() {
+  dnsServer.processNextRequest();
   server.handleClient();
   updateSensorsAndLogic();
-  delay(10); // Yield to keep Wi-Fi stack responsive
+  delay(10); // Yield to keep Wi-Fi and server responsive
 }
+

@@ -29,7 +29,7 @@
 
     // Connection & Telemetry
     esp32Status: 'ready', // 'ready', 'connected', 'disconnected', 'polling'
-    apiEndpoint: '/api/status',
+    apiEndpoint: (typeof window !== 'undefined' && window.location.protocol === 'file:') ? 'http://192.168.4.1/api/status' : '/api/status',
     pollIntervalMs: 500,
     pollingTimer: null,
     cycleCount: 0,
@@ -173,14 +173,17 @@
     // 7486 2-input XOR Gate 2: D3 ^ D4
     state.x2 = state.d3 ^ state.d4;
 
-    // 7486 2-input XOR Gate 3: X1 ^ X2 (Parity generator)
-    state.calculatedParity = state.x1 ^ state.x2;
+    // In demo mode or before first live poll, calculate parity and error locally
+    if (state.mode === 'demo' || state.calculatedParity === undefined) {
+      // 7486 2-input XOR Gate 3: X1 ^ X2 (Parity generator)
+      state.calculatedParity = state.x1 ^ state.x2;
 
-    // Main Error condition
-    state.hasError = (state.calculatedParity !== state.receivedParity);
+      // Main Error condition
+      state.hasError = (state.calculatedParity !== state.receivedParity);
 
-    // ESP32 GPIO26 Error LED: Active HIGH on error
-    state.errorLed = state.hasError;
+      // ESP32 GPIO26 Error LED: Active HIGH on error
+      state.errorLed = state.hasError;
+    }
 
     state.cycleCount++;
     state.lastUpdated = new Date();
@@ -493,17 +496,50 @@
       state.consecutiveFailures = 0;
       setConnectionStatus(true);
 
-      // Verify and update state from actual physical hardware pins
+      // Verify and update state from actual physical hardware pins & telemetry
+      const d1 = data.d1;
+      const d2 = data.d2;
+      const d3 = data.d3;
+      const d4 = data.d4;
+      const receivedParity = data.receivedParity !== undefined ? data.receivedParity : data.received_parity;
+      const calculatedParity = data.calculatedParity !== undefined ? data.calculatedParity : data.calculated_parity;
+      const errorDetected = data.errorDetected !== undefined ? data.errorDetected : data.error;
+      const errorLED = data.errorLED !== undefined ? data.errorLED : data.error_led;
+
       let stateChanged = false;
 
-      if (data.d1 !== undefined && state.d1 !== data.d1) { state.d1 = data.d1; stateChanged = true; }
-      if (data.d2 !== undefined && state.d2 !== data.d2) { state.d2 = data.d2; stateChanged = true; }
-      if (data.d3 !== undefined && state.d3 !== data.d3) { state.d3 = data.d3; stateChanged = true; }
-      if (data.d4 !== undefined && state.d4 !== data.d4) { state.d4 = data.d4; stateChanged = true; }
-      if (data.received_parity !== undefined && state.receivedParity !== data.received_parity) {
-        state.receivedParity = data.received_parity;
+      if (d1 !== undefined && state.d1 !== d1) { state.d1 = d1; stateChanged = true; }
+      if (d2 !== undefined && state.d2 !== d2) { state.d2 = d2; stateChanged = true; }
+      if (d3 !== undefined && state.d3 !== d3) { state.d3 = d3; stateChanged = true; }
+      if (d4 !== undefined && state.d4 !== d4) { state.d4 = d4; stateChanged = true; }
+      if (receivedParity !== undefined && state.receivedParity !== receivedParity) {
+        state.receivedParity = receivedParity;
         stateChanged = true;
       }
+
+      // Authoritative live outputs from ESP32 hardware telemetry
+      if (calculatedParity !== undefined && state.calculatedParity !== calculatedParity) {
+        state.calculatedParity = calculatedParity;
+        stateChanged = true;
+      }
+      if (errorDetected !== undefined) {
+        const errBool = Boolean(errorDetected);
+        if (state.hasError !== errBool) {
+          state.hasError = errBool;
+          stateChanged = true;
+        }
+      }
+      if (errorLED !== undefined) {
+        const ledBool = Boolean(errorLED);
+        if (state.errorLed !== ledBool) {
+          state.errorLed = ledBool;
+          stateChanged = true;
+        }
+      }
+
+      // Intermediate logic gate wire values for 7486 cascade diagram
+      state.x1 = state.d1 ^ state.d2;
+      state.x2 = state.d3 ^ state.d4;
 
       // Re-render UI on hardware state change or periodic cycle tick
       renderUI(stateChanged ? 'ESP32 Switch Changed' : 'ESP32 Polling Cycle');
@@ -737,6 +773,15 @@
     state.receivedParity = 0;
 
     renderUI('Dashboard Initialized (1010)');
+
+    // Auto-detect if served directly from ESP32 Access Point
+    const host = window.location.hostname;
+    const isEspHost = host === '192.168.4.1' || host === 'parityguard.local' || host === 'parity.local';
+    const isLiveParam = window.location.search.includes('mode=live');
+
+    if (isEspHost || isLiveParam) {
+      setMode('live');
+    }
   }
 
   // Boot on DOM ready

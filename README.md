@@ -80,20 +80,38 @@ $$\text{Error Flag} = P_{calc} \oplus P_{rx}$$
 
 ---
 
-## 🌐 ESP32 Wi-Fi & REST API Integration
+## 🌐 ESP32 Offline Access Point & LittleFS Integration
 
-When ready to connect to the actual ESP32 hardware:
+When serving the dashboard directly and completely offline from the ESP32:
 
-1. Open [`esp32_parity_guard.ino`](file:///d:/New%20folder%20%282%29/Lcd_project/esp32_parity_guard.ino) in the **Arduino IDE**.
+### Step 1: Upload the LittleFS Web Assets (Website Files)
+1. Ensure the `data/` folder exists in your sketch directory with `index.html`, `styles.css`, and `app.js`.
+2. In **Arduino IDE 1.x**:
+   - Install the [arduino-esp32littlefs-plugin](https://github.com/lorol/arduino-esp32littlefs-plugin).
+   - In Arduino IDE, click **Tools** → **ESP32 LittleFS Data Upload**.
+3. In **Arduino IDE 2.x**:
+   - Install the LittleFS upload extension (`arduino-littlefs-upload`), press `Ctrl+Shift+P` → **Upload LittleFS to Pico/ESP8266/ESP32**.
+   - *Alternatively, with Arduino CLI / esptool:*
+     ```bash
+     mklittlefs -c data -s 0x170000 -p 256 littlefs.bin
+     esptool.py --chip esp32 --port COM_PORT write_flash 0x290000 littlefs.bin
+     ```
+
+### Step 2: Flash the Arduino Sketch
+1. Open [`esp32_parity_guard.ino`](file:///d:/New%20folder%20%282%29/Lcd_project/esp32_parity_guard.ino) in Arduino IDE.
 2. Select your ESP32 board (`DOIT ESP32 DEVKIT V1` or similar).
 3. Connect your ESP32 via USB and click **Upload**.
 4. Open the Serial Monitor at **115200 baud**.
 5. The ESP32 will start an Access Point:
-   - **SSID**: `PARITY_GUARD_AP`
-   - **Password**: `12345678`
+   - **SSID**: `ParityGuard`
+   - **Password**: `Parity123`
    - **IP Address**: `192.168.4.1`
-6. Connect your laptop or phone to the `PARITY_GUARD_AP` Wi-Fi network.
-7. Open the dashboard, switch the mode to **ESP32 Live**, and it will automatically poll `http://192.168.4.1/api/status` every 500ms!
+
+### Step 3: Connect and View the Dashboard Offline
+1. Connect your phone, tablet, or laptop Wi-Fi to **ParityGuard** (Password: `Parity123`).
+2. Open any web browser and go to `http://192.168.4.1/` (or `http://parityguard.local`).
+3. The full dashboard loads directly from the ESP32's internal flash storage without needing internet access!
+4. It automatically detects the ESP32 host, starts in **Live Mode**, and polls relative `/api/status` every 500ms.
 
 ### `/api/status` JSON Response Contract:
 ```json
@@ -102,6 +120,10 @@ When ready to connect to the actual ESP32 hardware:
   "d2": 0,
   "d3": 1,
   "d4": 0,
+  "receivedParity": 0,
+  "calculatedParity": 0,
+  "errorDetected": false,
+  "errorLED": false,
   "received_parity": 0,
   "calculated_parity": 0,
   "error": false,
@@ -119,8 +141,13 @@ Lcd_project/
 ├── index.html              # Modern, responsive single-page dashboard
 ├── styles.css              # Dark navy glassmorphism & hardware design system
 ├── app.js                  # XOR parity logic, gate animations & ESP32 polling
-├── esp32_parity_guard.ino  # Production-ready Arduino sketch for ESP32
-└── README.md               # Complete project documentation and wiring guide
+├── esp32_parity_guard.ino  # Production-ready Arduino sketch for ESP32 with LittleFS
+├── data/                   # Web assets for ESP32 LittleFS flash upload
+│   ├── index.html
+│   ├── styles.css
+│   └── app.js
+├── README.md               # Complete project documentation and wiring guide
+└── *.bak                   # Pre-edit backup files
 ```
 
 ---
