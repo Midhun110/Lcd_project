@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PARITY GUARD — 4-Bit XOR Parity Error Detection System</title>
+  <meta name="description" content="Real-time hardware monitoring dashboard for ESP32 and 7486 XOR IC 4-bit parity error detection digital logic system.">
+  <meta name="theme-color" content="#080c16">
+
+  <!-- Google Fonts: Inter (UI) & JetBrains Mono (Digital logic & code) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="theme-navy">
+  <!-- Atmospheric background glowing orbs -->
+  <div class="ambient-glow glow-top-left"></div>
+  <div class="ambient-glow glow-top-right"></div>
+  <div class="ambient-glow glow-bottom-center"></div>
+
+  <!-- Network Connection Alert Banner (hidden unless offline in Live mode) -->
+  <div id="connectionBanner" class="connection-banner hidden">
+    <div class="banner-content">
+      <svg class="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/>
+        <line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+      <div class="banner-text">
+        <strong>ESP32 Hardware Disconnected</strong> — Polling <span id="bannerEndpoint">/api/status</span> failed. Reconnecting automatically...
+      </div>
+      <button id="bannerDismissBtn" class="banner-dismiss" title="Dismiss">✕</button>
+    </div>
+  </div>
+
+  <div class="dashboard-container">
+
+    <!-- 1. DASHBOARD HEADER -->
+    <header class="dashboard-header glass-card">
+      <div class="header-left">
+        <div class="logo-wrapper">
+          <div class="logo-shield">
+            <svg class="shield-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            <div class="shield-pulse"></div>
+          </div>
+          <div class="logo-core-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 2v3m0 14v3M2 12h3m14 0h3"/>
+            </svg>
+          </div>
+        </div>
+
+        <div class="brand-text">
+          <div class="title-row">
+            <h1 class="brand-title">PARITY GUARD</h1>
+            <span class="badge badge-version">v2.4 HW</span>
+          </div>
+          <p class="brand-subtitle">4-Bit XOR Parity Error Detection System</p>
+        </div>
+      </div>
+
+      <div class="header-center">
+        <!-- Live status chips -->
+        <div class="telemetry-pill">
+          <div class="telemetry-item">
+            <span class="telemetry-label">ESP32 STATUS</span>
+            <div class="telemetry-value" id="esp32StatusBadge">
+              <span class="status-dot connected" id="connectionDot"></span>
+              <span id="connectionText">Ready</span>
+            </div>
+          </div>
+          <div class="telemetry-divider"></div>
+          <div class="telemetry-item">
+            <span class="telemetry-label">TELEMETRY</span>
+            <div class="telemetry-value">
+              <span class="live-beacon"></span>
+              <span id="telemetryModeText">LIVE 500ms</span>
+            </div>
+          </div>
+          <div class="telemetry-divider"></div>
+          <div class="telemetry-item">
+            <span class="telemetry-label">PARITY SCHEME</span>
+            <div class="telemetry-value mono-val text-cyan">EVEN PARITY</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <!-- Mode Switcher: Interactive Demo vs Live Hardware -->
+        <div class="mode-selector-wrap">
+          <span class="mode-label">Mode:</span>
+          <div class="mode-toggle-group">
+            <button id="modeDemoBtn" class="mode-btn active" title="Interactive Simulation Mode: Click switches, test patterns">
+              <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="6" width="20" height="12" rx="2"/>
+                <path d="M6 12h4m-2-2v4m9-3h.01M17 13h.01"/>
+              </svg>
+              <span>Demo Sim</span>
+            </button>
+            <button id="modeLiveBtn" class="mode-btn" title="Live ESP32 Mode: Reads actual physical pins via /api/status">
+              <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+              </svg>
+              <span>ESP32 Live</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Quick settings button -->
+        <button id="configModalOpenBtn" class="icon-btn" title="Hardware Config & ESP32 API Endpoint">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- MODE CALLOUT BAR -->
+    <div id="modeCallout" class="mode-callout demo-active">
+      <div class="callout-inner">
+        <div class="callout-badge" id="calloutBadge">DEMO SIMULATION ACTIVE</div>
+        <p class="callout-text" id="calloutText">
+          Interactive evaluation mode enabled. Click on the switch cards below or use test presets to test parity error detection without hardware connected.
+        </p>
+      </div>
+      <div class="callout-actions" id="demoPresetsBar">
+        <span class="preset-label">Quick Test Vectors:</span>
+        <button class="preset-btn" data-preset="valid-0">All 0s (Clean)</button>
+        <button class="preset-btn" data-preset="valid-1">All 1s (Clean)</button>
+        <button class="preset-btn" data-preset="sample-valid">Pattern 1010 (Clean)</button>
+        <button class="preset-btn danger" data-preset="inject-error" title="Invert Switch 5 to create Parity Mismatch">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-mini-icon">
+            <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
+            <line x1="12" y1="2" x2="12" y2="12"/>
+          </svg>
+          Inject Error!
+        </button>
+        <button class="preset-btn" data-preset="random">🎲 Random Vector</button>
+      </div>
+    </div>
+
+    <!-- MAIN TWO-COLUMN HERO GRID -->
+    <div class="main-hero-grid">
+
+      <!-- 5. MAIN ERROR DETECTION STATUS CARD -->
+      <section class="glass-card status-hero-card" id="mainStatusCard">
+        <div class="card-glow-layer" id="heroGlow"></div>
+        <div class="hero-header">
+          <div class="hero-chip" id="heroStatusChip">TRANSMISSION VALIDATION STATUS</div>
+          <div class="hero-timestamp">
+            <span class="ts-label">Last Polled:</span>
+            <span id="lastUpdatedTs" class="ts-val">--:--:--</span>
+          </div>
+        </div>
+
+        <div class="hero-body">
+          <div class="hero-icon-container" id="heroIconContainer">
+            <!-- Dynamic SVG injected by JS: Shield check for PASS, Warning Triangle for ERROR -->
+            <div class="icon-pulse-ring" id="heroPulseRing"></div>
+            <div id="heroIconSlot" class="hero-icon-svg"></div>
+          </div>
+
+          <div class="hero-text-content">
+            <div class="hero-headline-wrap">
+              <h2 class="hero-headline" id="heroHeadline">NO ERROR DETECTED</h2>
+              <span class="hero-tag" id="heroTag">EVEN PARITY VERIFIED</span>
+            </div>
+            <p class="hero-explanation" id="heroExplanation">
+              Calculated parity matches received parity. The 4-bit data stream has arrived without single-bit inversion.
+            </p>
+            <div class="hero-details-row">
+              <div class="detail-badge">
+                <span class="db-label">Calculated P:</span>
+                <span class="db-val" id="heroPcalc">0</span>
+              </div>
+              <div class="detail-divider">==</div>
+              <div class="detail-badge">
+                <span class="db-label">Received P:</span>
+                <span class="db-val" id="heroPrx">0</span>
+              </div>
+              <div class="detail-divider">|</div>
+              <div class="detail-badge">
+                <span class="db-label">Total '1' Bits:</span>
+                <span class="db-val" id="heroOnesCount">0 (Even)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6. ESP32 ERROR INDICATOR (GPIO26 LED) & LIVE METRICS -->
+      <section class="glass-card hardware-indicator-card">
+        <div class="card-title-row">
+          <div class="title-with-icon">
+            <svg class="card-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <h3 class="card-title">ESP32 Hardware Error LED</h3>
+          </div>
+          <span class="pin-tag">PIN: GPIO 26</span>
+        </div>
+
+        <div class="led-display-container">
+          <!-- Realistic Breadboard LED Component -->
+          <div class="led-assembly">
+            <div class="led-socket">
+              <div class="led-dome" id="errorLedDome">
+                <div class="led-lens-reflection"></div>
+                <div class="led-emitter" id="errorLedEmitter"></div>
+              </div>
+              <div class="led-glow-halo" id="errorLedHalo"></div>
+            </div>
+            <div class="led-leads">
+              <div class="lead anode" title="Anode (GPIO 26)"></div>
+              <div class="lead cathode" title="Cathode (GND via 330Ω)"></div>
+            </div>
+          </div>
+
+          <div class="led-meta-details">
+            <div class="led-status-badge" id="ledStatusBadge">
+              <span class="led-state-text" id="ledStateText">LED OFF</span>
+              <span class="led-subtext" id="ledVoltageText">0.0V (LOW)</span>
+            </div>
+            <p class="led-description" id="ledDescText">
+              Output signal is LOW. The ESP32 circuit remains in normal state because parity bit parity check matched.
+            </p>
+            <div class="led-pin-specs">
+              <div class="spec-item">
+                <span class="s-label">Active State</span>
+                <span class="s-val text-red">HIGH on Error</span>
+              </div>
+              <div class="spec-item">
+                <span class="s-label">Resistor</span>
+                <span class="s-val">330 Ω Current Limit</span>
+              </div>
+              <div class="spec-item">
+                <span class="s-label">Logic Level</span>
+                <span class="s-val">3.3V CMOS</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mini hardware telemetry grid -->
+        <div class="mini-telemetry-grid">
+          <div class="mini-stat">
+            <span class="ms-label">Bit Word (HEX)</span>
+            <span class="ms-val" id="hexDisplay">0x0</span>
+          </div>
+          <div class="mini-stat">
+            <span class="ms-label">Parity Bit Check</span>
+            <span class="ms-val text-green" id="comparatorResult">MATCH</span>
+          </div>
+          <div class="mini-stat">
+            <span class="ms-label">Cycle Counter</span>
+            <span class="ms-val" id="cycleCounter">0</span>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- 3. FIVE PHYSICAL SWITCH INDICATORS -->
+    <section class="switches-section">
+      <div class="section-header-row">
+        <div>
+          <h2 class="section-title">Physical DIP Switch Indicators</h2>
+          <p class="section-subtitle">
+            Monitored hardware pins on ESP32 development board (GPIO 18, 19, 21, 22 & 25)
+          </p>
+        </div>
+        <div class="switch-legend">
+          <div class="legend-item"><span class="legend-dot on"></span> ON (Logic 1 / HIGH)</div>
+          <div class="legend-item"><span class="legend-dot off"></span> OFF (Logic 0 / LOW)</div>
+        </div>
+      </div>
+
+      <div class="switches-grid">
+
+        <!-- Switch 1: D1 GPIO 18 -->
+        <div class="glass-card switch-card" id="swCard1" data-sw="1" data-gpio="18">
+          <div class="switch-card-header">
+            <div class="sw-title-wrap">
+              <span class="sw-number">SWITCH 1</span>
+              <span class="sw-gpio-badge">GPIO 18</span>
+            </div>
+            <span class="sw-role-tag data-tag">DATA BIT D1</span>
+          </div>
+
+          <div class="switch-visual-box">
+            <div class="digital-digit" id="valD1">0</div>
+            <div class="physical-toggle-assembly">
+              <div class="toggle-track" id="trackD1">
+                <div class="toggle-slider">
+                  <div class="slider-notch"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="switch-footer">
+            <div class="sw-status-indicator">
+              <span class="indicator-led" id="ledD1"></span>
+              <span class="indicator-status-text" id="statusD1">OFF</span>
+            </div>
+            <span class="sw-interactivity-hint" id="hintD1">Click to toggle</span>
+          </div>
+        </div>
+
+        <!-- Switch 2: D2 GPIO 19 -->
+        <div class="glass-card switch-card" id="swCard2" data-sw="2" data-gpio="19">
+          <div class="switch-card-header">
+            <div class="sw-title-wrap">
+              <span class="sw-number">SWITCH 2</span>
+              <span class="sw-gpio-badge">GPIO 19</span>
+            </div>
+            <span class="sw-role-tag data-tag">DATA BIT D2</span>
+          </div>
+
+          <div class="switch-visual-box">
+            <div class="digital-digit" id="valD2">0</div>
+            <div class="physical-toggle-assembly">
+              <div class="toggle-track" id="trackD2">
+                <div class="toggle-slider">
+                  <div class="slider-notch"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="switch-footer">
+            <div class="sw-status-indicator">
+              <span class="indicator-led" id="ledD2"></span>
+              <span class="indicator-status-text" id="statusD2">OFF</span>
+            </div>
+            <span class="sw-interactivity-hint" id="hintD2">Click to toggle</span>
+          </div>
+        </div>
+
+        <!-- Switch 3: D3 GPIO 21 -->
+        <div class="glass-card switch-card" id="swCard3" data-sw="3" data-gpio="21">
+          <div class="switch-card-header">
+            <div class="sw-title-wrap">
+              <span class="sw-number">SWITCH 3</span>
+              <span class="sw-gpio-badge">GPIO 21</span>
+            </div>
+            <span class="sw-role-tag data-tag">DATA BIT D3</span>
+          </div>
+
+          <div class="switch-visual-box">
+            <div class="digital-digit" id="valD3">0</div>
+            <div class="physical-toggle-assembly">
+              <div class="toggle-track" id="trackD3">
+                <div class="toggle-slider">
+                  <div class="slider-notch"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="switch-footer">
+            <div class="sw-status-indicator">
+              <span class="indicator-led" id="ledD3"></span>
+              <span class="indicator-status-text" id="statusD3">OFF</span>
+            </div>
+            <span class="sw-interactivity-hint" id="hintD3">Click to toggle</span>
+          </div>
+        </div>
+
+        <!-- Switch 4: D4 GPIO 22 -->
+        <div class="glass-card switch-card" id="swCard4" data-sw="4" data-gpio="22">
+          <div class="switch-card-header">
+            <div class="sw-title-wrap">
+              <span class="sw-number">SWITCH 4</span>
+              <span class="sw-gpio-badge">GPIO 22</span>
+            </div>
+            <span class="sw-role-tag data-tag">DATA BIT D4</span>
+          </div>
+
+          <div class="switch-visual-box">
+            <div class="digital-digit" id="valD4">0</div>
+            <div class="physical-toggle-assembly">
+              <div class="toggle-track" id="trackD4">
+                <div class="toggle-slider">
+                  <div class="slider-notch"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="switch-footer">
+            <div class="sw-status-indicator">
+              <span class="indicator-led" id="ledD4"></span>
+              <span class="indicator-status-text" id="statusD4">OFF</span>
+            </div>
+            <span class="sw-interactivity-hint" id="hintD4">Click to toggle</span>
+          </div>
+        </div>
+
+        <!-- Switch 5: Received Parity GPIO 25 -->
+        <div class="glass-card switch-card parity-card" id="swCard5" data-sw="5" data-gpio="25">
+          <div class="switch-card-header">
+            <div class="sw-title-wrap">
+              <span class="sw-number">SWITCH 5</span>
+              <span class="sw-gpio-badge">GPIO 25</span>
+            </div>
+            <span class="sw-role-tag parity-tag">RECEIVED PARITY P_RX</span>
+          </div>
+
+          <div class="switch-visual-box">
+            <div class="digital-digit text-cyan" id="valPrx">0</div>
+            <div class="physical-toggle-assembly">
+              <div class="toggle-track" id="trackPrx">
+                <div class="toggle-slider">
+                  <div class="slider-notch"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="switch-footer">
+            <div class="sw-status-indicator">
+              <span class="indicator-led" id="ledPrx"></span>
+              <span class="indicator-status-text" id="statusPrx">OFF</span>
+            </div>
+            <span class="sw-interactivity-hint" id="hintPrx">Click to toggle</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- 4. PARITY CALCULATION & 7486 XOR GATE ARCHITECTURE -->
+    <section class="glass-card calculation-section">
+      <div class="card-title-row">
+        <div>
+          <h3 class="card-title">Parity Logic & 7486 XOR Gate Cascade</h3>
+          <p class="section-subtitle">Real-time hardware computation: P = D1 ⊕ D2 ⊕ D3 ⊕ D4 using Quad 2-Input XOR Gates</p>
+        </div>
+        <div class="formula-badge">
+          <code>P = D1 ⊕ D2 ⊕ D3 ⊕ D4</code>
+        </div>
+      </div>
+
+      <!-- Logic Gate Visual Tree -->
+      <div class="gate-diagram-container">
+        <div class="gate-stage stage-inputs">
+          <div class="diagram-label">INPUT BITS</div>
+          <div class="bit-node-box" id="nodeD1"><span class="node-name">D1</span><span class="node-val">0</span></div>
+          <div class="bit-node-box" id="nodeD2"><span class="node-name">D2</span><span class="node-val">0</span></div>
+          <div class="bit-node-box" id="nodeD3"><span class="node-name">D3</span><span class="node-val">0</span></div>
+          <div class="bit-node-box" id="nodeD4"><span class="node-name">D4</span><span class="node-val">0</span></div>
+        </div>
+
+        <div class="connector-wires wire-stage-1">
+          <svg class="wires-svg" viewBox="0 0 80 180">
+            <!-- Wire from D1 to Gate 1 -->
+            <path d="M 0 20 L 40 20 L 40 35 L 80 35" class="wire" id="wireD1"/>
+            <!-- Wire from D2 to Gate 1 -->
+            <path d="M 0 65 L 40 65 L 40 50 L 80 50" class="wire" id="wireD2"/>
+            <!-- Wire from D3 to Gate 2 -->
+            <path d="M 0 115 L 40 115 L 40 130 L 80 130" class="wire" id="wireD3"/>
+            <!-- Wire from D4 to Gate 2 -->
+            <path d="M 0 160 L 40 160 L 40 145 L 80 145" class="wire" id="wireD4"/>
+          </svg>
+        </div>
+
+        <div class="gate-stage stage-level1">
+          <div class="diagram-label">7486 GATE STAGE 1</div>
+          <!-- XOR Gate 1 -->
+          <div class="logic-gate-card" id="gateCard1">
+            <div class="gate-header">
+              <span class="gate-id">XOR 1</span>
+              <span class="gate-ic-tag">7486 1/4</span>
+            </div>
+            <div class="gate-symbol-wrap">
+              <div class="gate-equation">D1 ⊕ D2</div>
+              <div class="gate-out-pill" id="gateOutX1">X1 = 0</div>
+            </div>
+          </div>
+
+          <!-- XOR Gate 2 -->
+          <div class="logic-gate-card" id="gateCard2">
+            <div class="gate-header">
+              <span class="gate-id">XOR 2</span>
+              <span class="gate-ic-tag">7486 2/4</span>
+            </div>
+            <div class="gate-symbol-wrap">
+              <div class="gate-equation">D3 ⊕ D4</div>
+              <div class="gate-out-pill" id="gateOutX2">X2 = 0</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="connector-wires wire-stage-2">
+          <svg class="wires-svg" viewBox="0 0 80 180">
+            <!-- Wire from Gate 1 to Gate 3 -->
+            <path d="M 0 42 L 40 42 L 40 80 L 80 80" class="wire" id="wireX1"/>
+            <!-- Wire from Gate 2 to Gate 3 -->
+            <path d="M 0 138 L 40 138 L 40 100 L 80 100" class="wire" id="wireX2"/>
+          </svg>
+        </div>
+
+        <div class="gate-stage stage-level2">
+          <div class="diagram-label">7486 GATE STAGE 2</div>
+          <!-- XOR Gate 3: Final Parity Bit Generator -->
+          <div class="logic-gate-card highlight-card" id="gateCard3">
+            <div class="gate-header">
+              <span class="gate-id">XOR 3</span>
+              <span class="gate-ic-tag">7486 3/4</span>
+            </div>
+            <div class="gate-symbol-wrap">
+              <div class="gate-equation">X1 ⊕ X2</div>
+              <div class="gate-out-pill highlight" id="gateOutPcalc">P_calc = 0</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="connector-wires wire-stage-3">
+          <svg class="wires-svg" viewBox="0 0 80 180">
+            <!-- Wire from Gate 3 to Comparator -->
+            <path d="M 0 90 L 80 90" class="wire" id="wirePcalc"/>
+          </svg>
+        </div>
+
+        <div class="gate-stage stage-comparator">
+          <div class="diagram-label">PARITY COMPARATOR</div>
+          <!-- Comparator Gate / Check: P_calc vs P_rx -->
+          <div class="comparator-card" id="comparatorCard">
+            <div class="comp-header">
+              <span class="comp-id">COMPARISON</span>
+              <span class="comp-ic-tag" id="compResultTag">MATCH</span>
+            </div>
+            <div class="comp-metrics">
+              <div class="comp-row">
+                <span>Calculated P:</span>
+                <strong id="compCalcDisplay" class="text-cyan">0</strong>
+              </div>
+              <div class="comp-row">
+                <span>Received P:</span>
+                <strong id="compRecvDisplay" class="text-cyan">0</strong>
+              </div>
+              <div class="comp-row formula-row">
+                <span>P_calc ⊕ P_rx:</span>
+                <strong id="compDiffDisplay">0 (OK)</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Educational Breakdown Strip -->
+      <div class="calc-explanation-grid">
+        <div class="expl-card">
+          <div class="expl-step">1</div>
+          <div class="expl-content">
+            <h4>Binary Input Vector</h4>
+            <div class="binary-string-badge">
+              <span class="b-prefix">4-Bit Word:</span>
+              <span id="binaryStringVal" class="b-string">0 0 0 0</span>
+              <span class="b-parity-sep">+</span>
+              <span id="rxParityBadge" class="b-parity">P=0</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="expl-card">
+          <div class="expl-step">2</div>
+          <div class="expl-content">
+            <h4>Even Parity Rule</h4>
+            <p id="evenParityExplanation">
+              Even Parity requires the total count of 1s in the transmission frame (data + parity) to be an <strong>even number</strong>. If data has an odd number of 1s, parity is set to 1.
+            </p>
+          </div>
+        </div>
+
+        <div class="expl-card">
+          <div class="expl-step">3</div>
+          <div class="expl-content">
+            <h4>XOR Truth Verification</h4>
+            <p id="xorMathExplanation">
+              0 ⊕ 0 ⊕ 0 ⊕ 0 = <strong>0</strong>. Since calculated parity <strong>0</strong> equals received parity <strong>0</strong>, the transmission frame is free of single-bit errors.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. ADDITIONAL PANELS: TRUTH TABLE & EVENT HISTORY LOG -->
+    <div class="tabs-and-diagnostics-grid">
+
+      <!-- TRUTH TABLE SECTION WITH LIVE ACTIVE ROW HIGHLIGHT -->
+      <section class="glass-card truth-table-card">
+        <div class="card-title-row">
+          <div class="title-with-icon">
+            <svg class="card-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <line x1="3" y1="9" x2="21" y2="9"/>
+              <line x1="3" y1="15" x2="21" y2="15"/>
+              <line x1="9" y1="3" x2="9" y2="21"/>
+              <line x1="15" y1="3" x2="15" y2="21"/>
+            </svg>
+            <h3 class="card-title">4-Bit Even Parity Truth Table</h3>
+          </div>
+          <span class="table-legend-tag">Live Highlight Active Row</span>
+        </div>
+
+        <p class="section-subtitle">
+          All 16 input combinations ($2^4 = 16$). The active hardware state is automatically tracked and highlighted in real-time.
+        </p>
+
+        <div class="table-responsive-wrapper">
+          <table class="truth-table" id="truthTable">
+            <thead>
+              <tr>
+                <th>Dec</th>
+                <th>D1</th>
+                <th>D2</th>
+                <th>D3</th>
+                <th>D4</th>
+                <th># of 1s</th>
+                <th>Expected Parity (P)</th>
+                <th>Frame (D1-D4-P)</th>
+              </tr>
+            </thead>
+            <tbody id="truthTableBody">
+              <!-- Injected by JavaScript with all 16 rows -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- LIVE EVENT & TRANSMISSION AUDIT LOG -->
+      <section class="glass-card audit-log-card">
+        <div class="card-title-row">
+          <div class="title-with-icon">
+            <svg class="card-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+              <polyline points="10 9 9 9 8 9"/>
+            </svg>
+            <h3 class="card-title">Real-time Telemetry Event Log</h3>
+          </div>
+          <div class="log-actions">
+            <button id="clearLogBtn" class="mini-btn" title="Clear log">Clear</button>
+          </div>
+        </div>
+
+        <p class="section-subtitle">Rolling log of switch toggles, packet receipts, and error transitions.</p>
+
+        <div class="log-scroll-area" id="auditLogList">
+          <!-- Injected via JavaScript -->
+        </div>
+
+        <!-- System Architecture & IC Reference Card -->
+        <div class="hardware-spec-footer-box">
+          <div class="spec-footer-item">
+            <span class="sf-icon">⚡</span>
+            <div>
+              <strong>ESP32 Microcontroller</strong>
+              <p>Dual-core Xtensa 32-bit LX6 @ 240MHz, 3.3V Logic, Wi-Fi 802.11 b/g/n</p>
+            </div>
+          </div>
+          <div class="spec-footer-item">
+            <span class="sf-icon">🔲</span>
+            <div>
+              <strong>7486 Quad 2-Input XOR IC</strong>
+              <p>Standard TTL / CMOS quad exclusive-OR gate chip powering hardware parity</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- 8. FOOTER -->
+    <footer class="dashboard-footer">
+      <div class="footer-inner">
+        <div class="footer-left">
+          <div class="footer-brand">
+            <span class="footer-shield-icon">🛡️</span>
+            <strong>PARITY GUARD</strong>
+          </div>
+          <p class="footer-credit">Built with ESP32, 7486 XOR ICs and Arduino IDE</p>
+        </div>
+        <div class="footer-center">
+          <span class="college-tag">College Digital Electronics Lab Project — Parity Detection System</span>
+        </div>
+        <div class="footer-right">
+          <span class="footer-status-pill">System Online • Polling 500ms</span>
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- CONFIGURATION / ESP32 ENDPOINT MODAL -->
+  <div id="configModal" class="modal-overlay hidden">
+    <div class="modal-card glass-card">
+      <div class="modal-header">
+        <div class="title-with-icon">
+          <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          <h3 class="modal-title">Hardware Telemetry Settings</h3>
+        </div>
+        <button id="configModalCloseBtn" class="modal-close-btn" title="Close">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="apiUrlInput">ESP32 Status Endpoint URL:</label>
+          <input type="text" id="apiUrlInput" class="form-input" value="/api/status" placeholder="e.g. http://192.168.4.1/api/status or /api/status">
+          <span class="field-hint">When hosted directly on the ESP32, keep as <code>/api/status</code>. For cross-origin local testing, enter <code>http://192.168.4.1/api/status</code>.</span>
+        </div>
+
+        <div class="form-group">
+          <label for="pollIntervalInput">Telemetry Polling Interval (ms):</label>
+          <div class="slider-val-row">
+            <input type="range" id="pollIntervalInput" class="form-range" min="100" max="2000" step="50" value="500">
+            <span id="pollIntervalVal" class="range-display">500 ms</span>
+          </div>
+          <span class="field-hint">Recommended: 500ms for stable ESP32 HTTP response without overloading the micro web server.</span>
+        </div>
+
+        <div class="pin-mapping-reference">
+          <label>Configured ESP32 Hardware Pins:</label>
+          <div class="pins-table">
+            <div class="pin-row"><span>GPIO 18</span> <strong>Data Bit D1 (Switch 1)</strong></div>
+            <div class="pin-row"><span>GPIO 19</span> <strong>Data Bit D2 (Switch 2)</strong></div>
+            <div class="pin-row"><span>GPIO 21</span> <strong>Data Bit D3 (Switch 3)</strong></div>
+            <div class="pin-row"><span>GPIO 22</span> <strong>Data Bit D4 (Switch 4)</strong></div>
+            <div class="pin-row"><span>GPIO 25</span> <strong>Received Parity P_RX (Switch 5)</strong></div>
+            <div class="pin-row alert-row"><span>GPIO 26</span> <strong>Error Indicator LED (Active HIGH)</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="saveConfigBtn" class="preset-btn">Save & Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
